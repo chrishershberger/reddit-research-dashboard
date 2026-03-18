@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reddit Research Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<div class="app" x-data="dashboard()" x-init="init()">
+
+  <!-- Header -->
+  <header>
+    <h1>Reddit Research Dashboard</h1>
+    <div class="header-right">
+      <span style="font-size:13px;color:var(--text-muted)">
+        <span class="status-dot" :class="config.schedule?.enabled ? 'active' : 'inactive'"></span>
+        <span x-text="config.schedule?.enabled ? 'Scheduler: ' + config.schedule.description : 'Scheduler off'"></span>
+      </span>
+      <button class="btn btn-primary" @click="runAll()" :disabled="runningJobs.length > 0">
+        <template x-if="runningJobs.length > 0"><span class="spinner" style="width:12px;height:12px;border-width:2px;border-color:rgba(255,255,255,0.3);border-top-color:white"></span></template>
+        Run All Now
+      </button>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Topics</h2>
+      <button class="btn btn-sm btn-outline" @click="showAddTopic = true">+ Add</button>
+    </div>
+
+    <template x-for="topic in config.topics" :key="topic.id">
+      <div class="topic-card" :class="{ selected: selectedTopicId === topic.id }" @click="selectTopic(topic.id)">
+        <div class="topic-header">
+          <span class="topic-name" x-text="topic.label"></span>
+          <div class="toggle" :class="{ active: topic.enabled }" @click.stop="toggleTopic(topic)"></div>
+        </div>
+        <div class="topic-query" x-text="topic.searchQuery"></div>
+        <div class="topic-subs" x-text="topic.subreddits.map(s => 'r/' + s).join(', ')"></div>
+        <div class="topic-actions">
+          <button class="btn btn-sm btn-primary" @click.stop="runTopic(topic)" :disabled="isTopicRunning(topic.id)">
+            <template x-if="isTopicRunning(topic.id)"><span class="spinner" style="width:10px;height:10px;border-width:1.5px;border-color:rgba(255,255,255,0.3);border-top-color:white"></span></template>
+            Run
+          </button>
+          <button class="btn btn-sm btn-outline" @click.stop="editTopic(topic)">Edit</button>
+          <button class="btn btn-sm btn-danger" @click.stop="deleteTopic(topic)">Delete</button>
+        </div>
+      </div>
+    </template>
+
+    <!-- Schedule Settings -->
+    <div class="schedule-section">
+      <h2>Schedule</h2>
+      <div style="display:flex;align-items:center;gap:8px;margin:8px 0">
+        <div class="toggle" :class="{ active: config.schedule?.enabled }" @click="toggleSchedule()"></div>
+        <span style="font-size:13px" x-text="config.schedule?.enabled ? 'Enabled' : 'Disabled'"></span>
+      </div>
+      <div class="form-group" x-show="config.schedule?.enabled">
+        <label>Cron Expression</label>
+        <input type="text" x-model="config.schedule.cron" @change="updateSchedule()">
+        <div class="cron-presets">
+          <button class="btn btn-sm btn-outline" @click="setCron('0 6 * * *', 'Daily at 6am')">Daily 6am</button>
+          <button class="btn btn-sm btn-outline" @click="setCron('0 6 * * 1', 'Weekly Monday 6am')">Weekly Mon</button>
+          <button class="btn btn-sm btn-outline" @click="setCron('0 */12 * * *', 'Every 12 hours')">Every 12h</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+    <!-- Job progress banners -->
+    <template x-for="job in runningJobs" :key="job.id">
+      <div class="job-progress">
+        <span class="spinner"></span>
+        <strong x-text="job.topicLabel"></strong>:
+        <span x-text="job.statusText"></span>
+      </div>
+    </template>
+
+    <template x-if="!selectedTopicId">
+      <div class="empty-state">
+        <h2>Select a topic</h2>
+        <p>Choose a topic from the sidebar to view research history, or click Run to start a new scrape.</p>
+      </div>
+    </template>
+
+    <template x-if="selectedTopicId">
+      <div>
+        <h2 x-text="selectedTopicLabel()"></h2>
+
+        <!-- Run history -->
+        <div class="run-list">
+          <template x-if="topicRuns.length === 0">
+            <div class="empty-state" style="padding:24px">
+              <p>No runs yet. Click "Run" to start.</p>
+            </div>
+          </template>
+          <template x-for="run in topicRuns" :key="run.id">
+            <div class="run-item" :class="{ selected: selectedRunId === run.id }" @click="selectRun(run)">
+              <div>
+                <div class="run-date" x-text="formatDate(run.startedAt)"></div>
+                <div class="run-meta" x-text="run.rawPostCount + ' posts scraped'"></div>
+              </div>
+              <div>
+                <span class="badge" :class="'badge-' + run.trigger" x-text="run.trigger"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Summary -->
+        <template x-if="selectedRunData">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <h3 style="font-size:14px;color:var(--text-muted)" x-text="'Run: ' + formatDate(selectedRunData.startedAt) + ' \u2022 ' + selectedRunData.rawPostCount + ' posts'"></h3>
+            </div>
+            <div class="summary-content" x-html="renderMarkdown(selectedRunData.summary)"></div>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- Add/Edit Topic Modal -->
+  <template x-if="showAddTopic || editingTopic">
+    <div class="modal-overlay" @click.self="closeModal()">
+      <div class="modal">
+        <h3 x-text="editingTopic ? 'Edit Topic' : 'Add Topic'"></h3>
+        <div class="form-group">
+          <label>Label</label>
+          <input type="text" x-model="topicForm.label" placeholder="e.g. Delivery Apps">
+        </div>
+        <div class="form-group">
+          <label>Search Query</label>
+          <input type="text" x-model="topicForm.searchQuery" placeholder="e.g. doordash ubereats restaurant owner">
+        </div>
+        <div class="form-group">
+          <label>Subreddits (comma-separated)</label>
+          <input type="text" x-model="topicForm.subredditsStr" placeholder="e.g. restaurantowners, KitchenConfidential">
+        </div>
+        <div class="form-group">
+          <label>Max Items per Search</label>
+          <input type="number" x-model.number="topicForm.maxItems" min="5" max="250">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" @click="closeModal()">Cancel</button>
+          <button class="btn btn-primary" @click="saveTopic()">
+            <span x-text="editingTopic ? 'Save Changes' : 'Add Topic'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+</div>
+
+<script>
+function dashboard() {
+  return {
+    config: { topics: [], schedule: { enabled: false, cron: '', description: '' }, defaults: {} },
+    selectedTopicId: null,
+    selectedRunId: null,
+    selectedRunData: null,
+    topicRuns: [],
+    runningJobs: [],
+    showAddTopic: false,
+    editingTopic: null,
+    topicForm: { label: '', searchQuery: '', subredditsStr: '', maxItems: 50 },
+
+    async init() {
+      await this.loadConfig();
+      // Poll status every 5s
+      setInterval(() => this.pollStatus(), 5000);
+    },
+
+    async loadConfig() {
+      const res = await fetch('/api/config');
+      this.config = await res.json();
+    },
+
+    async selectTopic(topicId) {
+      this.selectedTopicId = topicId;
+      this.selectedRunId = null;
+      this.selectedRunData = null;
+      const res = await fetch(`/api/runs?topicId=${topicId}`);
+      this.topicRuns = await res.json();
+
+      // Auto-select most recent run
+      if (this.topicRuns.length > 0) {
+        this.selectRun(this.topicRuns[0]);
+      }
+    },
+
+    selectedTopicLabel() {
+      const t = this.config.topics.find(t => t.id === this.selectedTopicId);
+      return t ? t.label : '';
+    },
+
+    async selectRun(run) {
+      this.selectedRunId = run.id;
+      const slug = this.slugify(run.topicId);
+      const ts = run.startedAt.replace(/[:.]/g, '-');
+      const res = await fetch(`/api/runs/${slug}/${ts}`);
+      if (res.ok) {
+        this.selectedRunData = await res.json();
+      }
+    },
+
+    slugify(text) {
+      return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    },
+
+    formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    },
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      return marked.parse(text);
+    },
+
+    // --- Topic CRUD ---
+    async toggleTopic(topic) {
+      topic.enabled = !topic.enabled;
+      await fetch(`/api/topics/${topic.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: topic.enabled }),
+      });
+    },
+
+    editTopic(topic) {
+      this.editingTopic = topic;
+      this.topicForm = {
+        label: topic.label,
+        searchQuery: topic.searchQuery,
+        subredditsStr: topic.subreddits.join(', '),
+        maxItems: topic.maxItems,
+      };
+    },
+
+    async saveTopic() {
+      const data = {
+        label: this.topicForm.label,
+        searchQuery: this.topicForm.searchQuery,
+        subreddits: this.topicForm.subredditsStr.split(',').map(s => s.trim()).filter(Boolean),
+        maxItems: this.topicForm.maxItems,
+        enabled: true,
+      };
+
+      if (this.editingTopic) {
+        await fetch(`/api/topics/${this.editingTopic.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+      } else {
+        data.id = this.slugify(data.label);
+        await fetch('/api/topics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+      }
+
+      await this.loadConfig();
+      this.closeModal();
+    },
+
+    async deleteTopic(topic) {
+      if (!confirm(`Delete "${topic.label}"?`)) return;
+      await fetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
+      await this.loadConfig();
+      if (this.selectedTopicId === topic.id) {
+        this.selectedTopicId = null;
+        this.topicRuns = [];
+        this.selectedRunData = null;
+      }
+    },
+
+    closeModal() {
+      this.showAddTopic = false;
+      this.editingTopic = null;
+      this.topicForm = { label: '', searchQuery: '', subredditsStr: '', maxItems: 50 };
+    },
+
+    // --- Run topics ---
+    async runTopic(topic) {
+      const res = await fetch('/api/runs/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicId: topic.id }),
+      });
+      const { jobId } = await res.json();
+      this.trackJob(jobId, topic.id, topic.label);
+    },
+
+    async runAll() {
+      const res = await fetch('/api/runs/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicId: 'all' }),
+      });
+      const { jobIds } = await res.json();
+      for (const jobId of jobIds) {
+        // Find the topic for this job via status endpoint
+        this.trackJob(jobId, 'all', 'All Topics');
+      }
+    },
+
+    trackJob(jobId, topicId, topicLabel) {
+      const job = { id: jobId, topicId, topicLabel, statusText: 'Starting...' };
+      this.runningJobs.push(job);
+
+      const es = new EventSource(`/api/jobs/${jobId}/stream`);
+
+      es.addEventListener('scraping', (e) => {
+        const data = JSON.parse(e.data);
+        job.statusText = `Scraping Reddit for "${data.topicLabel}"...`;
+      });
+
+      es.addEventListener('summarizing', (e) => {
+        const data = JSON.parse(e.data);
+        job.statusText = `Summarizing ${data.postCount} posts with Claude...`;
+      });
+
+      es.addEventListener('complete', () => {
+        job.statusText = 'Complete!';
+        setTimeout(() => {
+          this.runningJobs = this.runningJobs.filter(j => j.id !== jobId);
+          // Refresh if viewing this topic
+          if (this.selectedTopicId === topicId || topicId === 'all') {
+            this.selectTopic(this.selectedTopicId);
+          }
+        }, 2000);
+        es.close();
+      });
+
+      es.addEventListener('error', (e) => {
+        job.statusText = 'Error occurred';
+        setTimeout(() => {
+          this.runningJobs = this.runningJobs.filter(j => j.id !== jobId);
+        }, 5000);
+        es.close();
+      });
+
+      es.addEventListener('done', () => {
+        es.close();
+      });
+
+      es.onerror = () => {
+        es.close();
+      };
+    },
+
+    isTopicRunning(topicId) {
+      return this.runningJobs.some(j => j.topicId === topicId || j.topicId === 'all');
+    },
+
+    async pollStatus() {
+      // Light poll just to catch scheduler-triggered jobs
+      try {
+        const res = await fetch('/api/status');
+        const status = await res.json();
+        // Update scheduler display
+        if (status.scheduler) {
+          this.config.schedule.enabled = status.scheduler.enabled;
+        }
+      } catch {}
+    },
+
+    // --- Schedule ---
+    async toggleSchedule() {
+      this.config.schedule.enabled = !this.config.schedule.enabled;
+      await this.saveFullConfig();
+    },
+
+    async setCron(cron, desc) {
+      this.config.schedule.cron = cron;
+      this.config.schedule.description = desc;
+      await this.saveFullConfig();
+    },
+
+    async updateSchedule() {
+      await this.saveFullConfig();
+    },
+
+    async saveFullConfig() {
+      await fetch('/api/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.config),
+      });
+    },
+  };
+}
+</script>
+
+</body>
+</html>

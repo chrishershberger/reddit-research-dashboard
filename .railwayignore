@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+test
+features
+scripts
+docs
+website
+bundles
+.yarn
+.git
+*.md
+!README.md
