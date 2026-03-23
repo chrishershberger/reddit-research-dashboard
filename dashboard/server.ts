@@ -245,7 +245,14 @@ app.get("/api/status", (_req, res) => {
     topicLabel: j.topicLabel,
     status: j.status,
   }));
-  res.json({ scheduler, activeJobs: jobs });
+  res.json({
+    scheduler,
+    activeJobs: jobs,
+    env: {
+      APIFY_TOKEN: process.env.APIFY_TOKEN ? `set (${process.env.APIFY_TOKEN.slice(0, 12)}...)` : "MISSING",
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? `set (${process.env.ANTHROPIC_API_KEY.slice(0, 12)}...)` : "MISSING",
+    },
+  });
 });
 
 // --- Start ---
