@@ -3,7 +3,11 @@ import { join, dirname } from "node:path";
 import type { RunResult } from "./research.js";
 
 // --- Paths ---
-const DATA_DIR = join(decodeURIComponent(dirname(new URL(import.meta.url).pathname)), "..", "data");
+// Use RAILWAY_VOLUME_MOUNT_PATH or DATA_DIR env var for persistent storage,
+// otherwise fall back to local ./dashboard/data
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  || process.env.DATA_DIR
+  || join(decodeURIComponent(dirname(new URL(import.meta.url).pathname)), "..", "data");
 const CONFIG_PATH = join(DATA_DIR, "config.json");
 const RUNS_DIR = join(DATA_DIR, "runs");
 const INDEX_PATH = join(RUNS_DIR, "index.json");
