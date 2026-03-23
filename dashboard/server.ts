@@ -67,27 +67,42 @@ async function executeRun(topic: Topic, trigger: "manual" | "scheduled"): Promis
       broadcastSSE(job, event, data);
     };
 
-    const result: RunResult = await runResearch({
-      topicId: topic.id,
-      topicLabel: topic.label,
-      searchQuery: topic.searchQuery,
-      subreddits: topic.subreddits,
-      maxItems: topic.maxItems,
-      trigger,
-      onProgress,
-    });
+    try {
+      const result: RunResult = await runResearch({
+        topicId: topic.id,
+        topicLabel: topic.label,
+        searchQuery: topic.searchQuery,
+        subreddits: topic.subreddits,
+        maxItems: topic.maxItems,
+        trigger,
+        onProgress,
+      });
 
-    job.status = result.status === "complete" ? "complete" : "error";
+      job.status = result.status === "complete" ? "complete" : "error";
 
-    // Persist result
-    if (result.status === "complete") {
-      await saveRun(result);
-    }
+      // Persist result
+      if (result.status === "complete") {
+        await saveRun(result);
+        console.log(`[Run] Saved result for "${topic.label}" (${result.rawPostCount} posts)`);
+      } else {
+        console.error(`[Run] Failed for "${topic.label}": ${result.status}`);
+      }
 
-    // Close SSE connections
-    for (const client of job.sseClients) {
-      client.write(`event: done\ndata: ${JSON.stringify({ id: result.id, status: result.status })}\n\n`);
-      client.end();
+      // Close SSE connections
+      for (const client of job.sseClients) {
+        client.write(`event: done\ndata: ${JSON.stringify({ id: result.id, status: result.status })}\n\n`);
+        client.end();
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[Run] Unhandled error for "${topic.label}": ${errMsg}`);
+      job.status = "error";
+
+      for (const client of job.sseClients) {
+        client.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
+        client.write(`event: done\ndata: ${JSON.stringify({ status: "error" })}\n\n`);
+        client.end();
+      }
     }
 
     // Clean up after 2 minutes
