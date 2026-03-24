@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { join, dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { Response } from "express";
 
 import { checkEnvVars, runResearch } from "./lib/research.js";
@@ -122,6 +122,40 @@ async function scheduledRunCallback(topic: Topic): Promise<void> {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// --- Simple auth middleware ---
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "";
+
+function hashToken(password: string): string {
+  return createHash("sha256").update(password).digest("hex");
+}
+
+// Login endpoint (no auth required)
+app.post("/api/login", (req, res) => {
+  if (!DASHBOARD_PASSWORD) {
+    // No password set — open access
+    res.json({ ok: true, token: "open" });
+    return;
+  }
+  const { password } = req.body;
+  if (password === DASHBOARD_PASSWORD) {
+    res.json({ ok: true, token: hashToken(DASHBOARD_PASSWORD) });
+  } else {
+    res.status(401).json({ ok: false, error: "Wrong password" });
+  }
+});
+
+// Auth check for all other /api routes
+app.use("/api", (req, res, next) => {
+  if (!DASHBOARD_PASSWORD) return next(); // no password set = open access
+
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (token === hashToken(DASHBOARD_PASSWORD)) {
+    return next();
+  }
+
+  res.status(401).json({ error: "Unauthorized" });
+});
 
 const __dirname = decodeURIComponent(dirname(new URL(import.meta.url).pathname));
 const publicDir = join(__dirname, "public");

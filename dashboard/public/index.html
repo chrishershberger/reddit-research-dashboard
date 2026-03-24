@@ -10,6 +10,20 @@
 </head>
 <body>
 
+<!-- Login Screen -->
+<div id="login-screen" style="display:none; position:fixed; inset:0; background:#f5f5f5; z-index:9999; display:flex; align-items:center; justify-content:center;">
+  <div style="background:white; padding:40px; border-radius:12px; box-shadow:0 4px 24px rgba(0,0,0,0.1); max-width:360px; width:100%; text-align:center;">
+    <h1 style="margin:0 0 8px; font-size:20px;">Reddit Research Dashboard</h1>
+    <p style="color:#666; margin:0 0 24px; font-size:14px;">Enter password to continue</p>
+    <form id="login-form">
+      <input id="login-password" type="password" placeholder="Password" autofocus
+        style="width:100%; padding:10px 14px; border:1px solid #ddd; border-radius:8px; font-size:15px; margin-bottom:12px; box-sizing:border-box;">
+      <button type="submit" style="width:100%; padding:10px; background:#2563eb; color:white; border:none; border-radius:8px; font-size:15px; cursor:pointer;">Log in</button>
+      <p id="login-error" style="color:#e11d48; margin:12px 0 0; font-size:13px; display:none;">Wrong password</p>
+    </form>
+  </div>
+</div>
+
 <div class="app" x-data="dashboard()" x-init="init()">
 
   <!-- Header -->
@@ -161,6 +175,70 @@
 </div>
 
 <script>
+// --- Auth helpers ---
+let authToken = localStorage.getItem('dashboard_token') || '';
+
+async function authFetch(url, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
+  const res = await fetch(url, opts);
+  if (res.status === 401) {
+    localStorage.removeItem('dashboard_token');
+    authToken = '';
+    showLogin();
+    throw new Error('Unauthorized');
+  }
+  return res;
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.querySelector('.app').style.display = 'none';
+}
+
+function hideLogin() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.querySelector('.app').style.display = '';
+}
+
+// Check auth on load
+(async () => {
+  // Try loading config — if 401, show login
+  try {
+    const res = await fetch('/api/config', {
+      headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+    });
+    if (res.status === 401) {
+      showLogin();
+    } else {
+      hideLogin();
+    }
+  } catch {
+    hideLogin(); // network error = probably no auth needed
+  }
+})();
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('login-password').value;
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pw }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    authToken = data.token;
+    localStorage.setItem('dashboard_token', authToken);
+    hideLogin();
+    document.getElementById('login-error').style.display = 'none';
+    // Re-init Alpine
+    document.querySelector('[x-data]').__x.$data.init();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+});
+
 function dashboard() {
   return {
     config: { topics: [], schedule: { enabled: false, cron: '', description: '' }, defaults: {} },
@@ -180,7 +258,7 @@ function dashboard() {
     },
 
     async loadConfig() {
-      const res = await fetch('/api/config');
+      const res = await authFetch('/api/config');
       this.config = await res.json();
     },
 
@@ -188,7 +266,7 @@ function dashboard() {
       this.selectedTopicId = topicId;
       this.selectedRunId = null;
       this.selectedRunData = null;
-      const res = await fetch(`/api/runs?topicId=${topicId}`);
+      const res = await authFetch(`/api/runs?topicId=${topicId}`);
       this.topicRuns = await res.json();
 
       // Auto-select most recent run
@@ -206,7 +284,7 @@ function dashboard() {
       this.selectedRunId = run.id;
       const slug = this.slugify(run.topicId);
       const ts = run.startedAt.replace(/[:.]/g, '-');
-      const res = await fetch(`/api/runs/${slug}/${ts}`);
+      const res = await authFetch(`/api/runs/${slug}/${ts}`);
       if (res.ok) {
         this.selectedRunData = await res.json();
       }
@@ -230,7 +308,7 @@ function dashboard() {
     // --- Topic CRUD ---
     async toggleTopic(topic) {
       topic.enabled = !topic.enabled;
-      await fetch(`/api/topics/${topic.id}`, {
+      await authFetch(`/api/topics/${topic.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: topic.enabled }),
@@ -257,14 +335,14 @@ function dashboard() {
       };
 
       if (this.editingTopic) {
-        await fetch(`/api/topics/${this.editingTopic.id}`, {
+        await authFetch(`/api/topics/${this.editingTopic.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         });
       } else {
         data.id = this.slugify(data.label);
-        await fetch('/api/topics', {
+        await authFetch('/api/topics', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -277,7 +355,7 @@ function dashboard() {
 
     async deleteTopic(topic) {
       if (!confirm(`Delete "${topic.label}"?`)) return;
-      await fetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
+      await authFetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
       await this.loadConfig();
       if (this.selectedTopicId === topic.id) {
         this.selectedTopicId = null;
@@ -294,7 +372,7 @@ function dashboard() {
 
     // --- Run topics ---
     async runTopic(topic) {
-      const res = await fetch('/api/runs/trigger', {
+      const res = await authFetch('/api/runs/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topicId: topic.id }),
@@ -304,7 +382,7 @@ function dashboard() {
     },
 
     async runAll() {
-      const res = await fetch('/api/runs/trigger', {
+      const res = await authFetch('/api/runs/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topicId: 'all' }),
@@ -368,7 +446,7 @@ function dashboard() {
     async pollStatus() {
       // Light poll just to catch scheduler-triggered jobs
       try {
-        const res = await fetch('/api/status');
+        const res = await authFetch('/api/status');
         const status = await res.json();
         // Update scheduler display
         if (status.scheduler) {
@@ -394,7 +472,7 @@ function dashboard() {
     },
 
     async saveFullConfig() {
-      await fetch('/api/config', {
+      await authFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(this.config),
