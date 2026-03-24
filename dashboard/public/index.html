@@ -45,7 +45,10 @@
   <div class="sidebar">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2 style="margin:0">Topics</h2>
-      <button class="btn btn-sm btn-outline" @click="showAddTopic = true">+ Add</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-outline" @click="showDiscover = true" title="Find relevant subreddits">Discover</button>
+        <button class="btn btn-sm btn-outline" @click="showAddTopic = true">+ Add</button>
+      </div>
     </div>
 
     <template x-for="topic in config.topics" :key="topic.id">
@@ -172,6 +175,69 @@
     </div>
   </template>
 
+  <!-- Discover Subreddits Modal -->
+  <template x-if="showDiscover">
+    <div class="modal-overlay" @click.self="showDiscover = false">
+      <div class="modal" style="max-width:600px">
+        <h3>Discover Subreddits</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin:-4px 0 16px">Search Reddit broadly to find which subreddits discuss a topic most.</p>
+
+        <div class="form-group">
+          <label>Search keyword or phrase</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" x-model="discoverQuery" placeholder="e.g. restaurant food costs" @keydown.enter="runDiscover()" style="flex:1">
+            <button class="btn btn-primary" @click="runDiscover()" :disabled="discoverLoading">
+              <template x-if="discoverLoading"><span class="spinner" style="width:12px;height:12px;border-width:2px;border-color:rgba(255,255,255,0.3);border-top-color:white"></span></template>
+              <span x-text="discoverLoading ? 'Searching...' : 'Search'"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <template x-if="discoverResults">
+          <div>
+            <p style="font-size:13px;color:var(--text-muted);margin:12px 0 8px">
+              Found <strong x-text="discoverResults.totalPosts"></strong> posts across
+              <strong x-text="discoverResults.subreddits.length"></strong> subreddits for
+              "<span x-text="discoverResults.query"></span>"
+            </p>
+
+            <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px">
+              <template x-for="sub in discoverResults.subreddits" :key="sub.name">
+                <div style="display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #f3f4f6;gap:10px;cursor:pointer"
+                     :style="discoverSelected.includes(sub.name) ? 'background:#eff6ff' : ''"
+                     @click="toggleDiscoverSub(sub.name)">
+                  <input type="checkbox" :checked="discoverSelected.includes(sub.name)" @click.stop="toggleDiscoverSub(sub.name)" style="margin:0">
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <strong style="font-size:14px" x-text="'r/' + sub.name"></strong>
+                      <span style="font-size:12px;color:var(--text-muted);background:#f3f4f6;padding:1px 8px;border-radius:99px" x-text="sub.count + ' posts'"></span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                         x-text="sub.sampleTitles.slice(0,2).join(' | ')"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <template x-if="discoverSelected.length > 0">
+              <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px;color:var(--text-muted)">
+                  <strong x-text="discoverSelected.length"></strong> subreddits selected
+                </span>
+                <button class="btn btn-primary btn-sm" @click="useDiscoveredSubs()">Create Topic with Selected</button>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="btn btn-outline" @click="showDiscover = false; discoverResults = null; discoverSelected = [];">Close</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
 </div>
 
 <script>
@@ -250,6 +316,11 @@ function dashboard() {
     showAddTopic: false,
     editingTopic: null,
     topicForm: { label: '', searchQuery: '', subredditsStr: '', maxItems: 50 },
+    showDiscover: false,
+    discoverQuery: '',
+    discoverLoading: false,
+    discoverResults: null,
+    discoverSelected: [],
 
     async init() {
       await this.loadConfig();
@@ -368,6 +439,50 @@ function dashboard() {
       this.showAddTopic = false;
       this.editingTopic = null;
       this.topicForm = { label: '', searchQuery: '', subredditsStr: '', maxItems: 50 };
+    },
+
+    // --- Discover subreddits ---
+    async runDiscover() {
+      if (!this.discoverQuery.trim()) return;
+      this.discoverLoading = true;
+      this.discoverResults = null;
+      this.discoverSelected = [];
+      try {
+        const res = await authFetch('/api/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: this.discoverQuery, maxItems: 100 }),
+        });
+        this.discoverResults = await res.json();
+      } catch (err) {
+        console.error('Discover error:', err);
+      } finally {
+        this.discoverLoading = false;
+      }
+    },
+
+    toggleDiscoverSub(name) {
+      const idx = this.discoverSelected.indexOf(name);
+      if (idx >= 0) {
+        this.discoverSelected.splice(idx, 1);
+      } else {
+        this.discoverSelected.push(name);
+      }
+    },
+
+    useDiscoveredSubs() {
+      // Pre-fill the Add Topic form with discovered subreddits
+      this.showDiscover = false;
+      this.showAddTopic = true;
+      this.editingTopic = null;
+      this.topicForm = {
+        label: '',
+        searchQuery: this.discoverQuery,
+        subredditsStr: this.discoverSelected.join(', '),
+        maxItems: 50,
+      };
+      this.discoverResults = null;
+      this.discoverSelected = [];
     },
 
     // --- Run topics ---

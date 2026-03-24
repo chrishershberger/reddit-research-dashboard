@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import type { Response } from "express";
 
-import { checkEnvVars, runResearch } from "./lib/research.js";
+import { checkEnvVars, runResearch, scrapeReddit } from "./lib/research.js";
 import type { RunResult, OnProgress } from "./lib/research.js";
 import {
   initStorage,
@@ -160,6 +160,44 @@ app.use("/api", (req, res, next) => {
 const __dirname = decodeURIComponent(dirname(new URL(import.meta.url).pathname));
 const publicDir = join(__dirname, "public");
 app.use(express.static(publicDir));
+
+// --- API: Discover subreddits ---
+app.post("/api/discover", async (req, res) => {
+  const { query, maxItems = 100 } = req.body;
+  if (!query || typeof query !== "string") {
+    res.status(400).json({ error: "query is required" });
+    return;
+  }
+
+  try {
+    // Scrape Reddit-wide (no subreddit filter)
+    const items = await scrapeReddit(query, [], Math.min(maxItems, 250));
+
+    // Tally subreddits
+    const counts = new Map<string, { count: number; sampleTitles: string[] }>();
+    for (const item of items) {
+      const sub = (item.subreddit || item.communityName || "unknown") as string;
+      const entry = counts.get(sub) || { count: 0, sampleTitles: [] };
+      entry.count++;
+      if (entry.sampleTitles.length < 3) {
+        const title = (item.title || "") as string;
+        if (title) entry.sampleTitles.push(title);
+      }
+      counts.set(sub, entry);
+    }
+
+    // Sort by frequency
+    const subreddits = Array.from(counts.entries())
+      .map(([name, data]) => ({ name, count: data.count, sampleTitles: data.sampleTitles }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({ query, totalPosts: items.length, subreddits });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Discover] Error: ${msg}`);
+    res.status(500).json({ error: msg });
+  }
+});
 
 // --- API: Config ---
 app.get("/api/config", async (_req, res) => {
