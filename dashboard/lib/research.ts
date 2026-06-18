@@ -169,6 +169,8 @@ export async function scrapeReddit(
   fetchComments = true,
 ): Promise<Record<string, unknown>[]> {
   const cap = Math.min(maxItems, 250);
+  // PullPush has no quote/phrase syntax — quotes become literal characters and match nothing.
+  const query = topic.replace(/"/g, "").trim();
   let items: RedditItem[] = [];
   const seen = new Set<string>();
 
@@ -188,14 +190,14 @@ export async function scrapeReddit(
     const perSub = Math.max(10, Math.ceil(cap / cleanSubs.length));
     for (const sub of cleanSubs) {
       try {
-        addUnique(await searchSubmissions(topic, sub, perSub));
+        addUnique(await searchSubmissions(query, sub, perSub));
       } catch (err) {
         // One bad/private subreddit shouldn't kill the whole run.
         console.warn(`[PullPush] Search failed for r/${sub}: ${(err as Error).message}`);
       }
     }
   } else {
-    addUnique(await searchSubmissions(topic, null, cap));
+    addUnique(await searchSubmissions(query, null, cap));
   }
 
   // Highest-scoring posts first, then cap.

@@ -487,6 +487,8 @@ function dashboard() {
 
     // --- Run topics ---
     async runTopic(topic) {
+      // Open this topic's panel so its progress + new result show up in place.
+      this.selectTopic(topic.id);
       const res = await authFetch('/api/runs/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
