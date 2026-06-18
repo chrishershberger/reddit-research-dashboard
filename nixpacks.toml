@@ -4,5 +4,11 @@ nixPkgs = ["nodejs_22"]
 [phases.install]
 cmds = ["npm install --legacy-peer-deps"]
 
+# Override Nixpacks' auto-detected build. The repo's `build` script is the
+# Apify CLI's `tsc && tsup` (run as `yarn run build`, but yarn isn't in the
+# image). The dashboard needs no build — it runs the .ts files via tsx.
+[phases.build]
+cmds = ["echo 'No build step: dashboard runs directly via tsx'"]
+
 [start]
 cmd = "npx tsx dashboard/server.ts"
