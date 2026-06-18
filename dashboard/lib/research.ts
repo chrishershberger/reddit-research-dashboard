@@ -78,7 +78,15 @@ async function pullpushGet(path: string, params: Record<string, string>, attempt
     throw new Error(`PullPush error (${res.status} ${res.statusText}) for ${path}. ${text.slice(0, 150)}`);
   }
 
-  const json = await res.json();
+  // PullPush occasionally returns an empty/non-JSON body on a 200 — don't crash on it.
+  const text = await res.text();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let json: any = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    return [];
+  }
   return Array.isArray(json?.data) ? json.data : [];
 }
 
@@ -254,7 +262,7 @@ export async function summarize(topic: string, redditData: string): Promise<stri
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
     max_tokens: 2048,
     messages: [
       {
@@ -334,8 +342,9 @@ export async function runResearch(params: {
     if (items.length === 0) {
       const where = subreddits.length ? ` in ${subreddits.map((s) => `r/${s}`).join(", ")}` : "";
       throw new Error(
-        `Reddit returned 0 posts for "${searchQuery}"${where}. ` +
-          `Try a broader query or different subreddits, or verify your Reddit API credentials.`,
+        `PullPush returned 0 posts for "${searchQuery}"${where}. ` +
+          `PullPush matches all keywords literally — try fewer / shorter keywords ` +
+          `(one or two distinctive words work best) or different subreddits.`,
       );
     }
 
