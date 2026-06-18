@@ -538,10 +538,17 @@ function dashboard() {
       });
 
       es.addEventListener('error', (e) => {
-        job.statusText = 'Error occurred';
+        let msg = 'Error occurred';
+        try {
+          if (e && e.data) {
+            const d = JSON.parse(e.data);
+            if (d && d.error) msg = d.error;
+          }
+        } catch {}
+        job.statusText = msg;
         setTimeout(() => {
           this.runningJobs = this.runningJobs.filter(j => j.id !== jobId);
-        }, 5000);
+        }, 10000);
         es.close();
       });
 

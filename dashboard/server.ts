@@ -1,3 +1,4 @@
+import "./lib/env.js"; // must be first: loads .env before any module reads process.env
 import express from "express";
 import cors from "cors";
 import { join, dirname } from "node:path";
@@ -170,8 +171,8 @@ app.post("/api/discover", async (req, res) => {
   }
 
   try {
-    // Scrape Reddit-wide (no subreddit filter)
-    const items = await scrapeReddit(query, [], Math.min(maxItems, 250));
+    // Scrape Reddit-wide (no subreddit filter). Skip comment enrichment — we only tally subreddits.
+    const items = await scrapeReddit(query, [], Math.min(maxItems, 250), false);
 
     // Tally subreddits
     const counts = new Map<string, { count: number; sampleTitles: string[] }>();
@@ -336,8 +337,8 @@ app.get("/api/status", (_req, res) => {
     scheduler,
     activeJobs: jobs,
     env: {
-      APIFY_TOKEN: process.env.APIFY_TOKEN ? `set (${process.env.APIFY_TOKEN.slice(0, 12)}...)` : "MISSING",
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? `set (${process.env.ANTHROPIC_API_KEY.slice(0, 12)}...)` : "MISSING",
+      DATA_SOURCE: "PullPush.io (no API key required)",
     },
   });
 });

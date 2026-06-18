@@ -1,5 +1,6 @@
 #!/usr/bin/env npx tsx
 
+import "./dashboard/lib/env.js"; // must be first: loads .env before any module reads process.env
 import { checkEnvVars, scrapeReddit, prepareForSummary, summarize } from "./dashboard/lib/research.js";
 
 // --- Validate env ---
